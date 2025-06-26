@@ -3,24 +3,23 @@ import face_recognition
 import os
 import requests
 import io
-from datetime import datetime
-from geopy.geocoders import Nominatim
-import geocoder
+from datetime import datetime, timedelta
 
 #---------------------------------#
 KNOWN_FACES_DIR  = 'known_faces'
 TOLERANCE        = 0.50
 FRAME_RESIZE     = 0.5
 MODEL            = 'hog'
-NUM_JITTERS      = 2
-CONSEC_FRAMES    = 3     # contagens de frames consecutivos
+NUM_JITTERS      = 1
+CONSEC_FRAMES    = 0     # contagens de frames em consequencia
+ALERT_COOLDOWN   = timedelta(minutes=1) 
 
-# --- telegram Bot ---
-BOT_TOKEN        = "8055665716:AAFoRpjHDYBq__72ViRQVoXblNQ3--U_fuc"
-CHAT_ID          = "6149329556"
+# --- botttttt ---
+BOT_TOKEN        = "BOT TOKEN coloque aqui" #---substitua por token de bot do Telegram
+CHAT_ID          = "CHAT ID coloque aqui" #---substitua por chat id do Telegram
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto"
 
-# === carrega encodings na memória a cada execução ===
+# === carrega encodings na memória a cada execuaooooooo ===
 known_names     = []
 known_encodings = []
 
@@ -35,19 +34,7 @@ for filename in os.listdir(KNOWN_FACES_DIR):
 
 print(f"Carregadas {len(known_names)} pessoas conhecidas.")
 
-# === geolocalização via IP ===
-def get_neighborhood():
-    try:
-        g = geocoder.ip('me')
-        latlng = g.latlng
-        loc = Nominatim(user_agent="app_face").reverse(latlng, language='pt')
-        addr = loc.raw.get('address', {})
-        return addr.get('suburb') or addr.get('neighbourhood') or addr.get('city')
-    except Exception:
-        return 'Bairro desconhecido'
-
 # === inicializa captura de vídeo na Iriun Webcam ===
-# Tente primeiro pelo nome no Windows DirectShow; se falhar, tenta índice 1
 cap = cv2.VideoCapture("video=Iriun Webcam", cv2.CAP_DSHOW)
 if not cap.isOpened():
     print("Iriun Webcam não abriu por nome, tentando índice 1...")
@@ -55,7 +42,9 @@ if not cap.isOpened():
     if not cap.isOpened():
         raise RuntimeError("Não foi possível abrir a Iriun Webcam (nome ou índice).")
 
-frame_counts = {}
+# Dicionários de apoio:
+frame_counts   = {}  # conta quantos frames consecutivos cada nome apareceu
+last_alert     = {}  # armazena datetime do último alerta enviado para cada nome
 
 while True:
     ret, frame = cap.read()
@@ -84,39 +73,50 @@ while True:
             if dists[best] < TOLERANCE:
                 name = known_names[best]
 
-        # conta detecção consecutiva
-        if name != 'Desconhecido':
-            frame_counts[name] = frame_counts.get(name, 0) + 1
-        else:
+        # se for rosto desconhecido, ignora
+        if name == 'Desconhecido':
             continue
 
-        # alerta quando confirmado em X frames
+        # conta detecção consecutiva
+        frame_counts[name] = frame_counts.get(name, 0) + 1
+
+        # quando atingir X frames consecutivos, tenta enviar alerta
         if frame_counts[name] >= CONSEC_FRAMES:
-            # ajusta box ao tamanho original
-            top, right, bottom, left = [int(v / FRAME_RESIZE) for v in loc]
-            face_img = frame[top:bottom, left:right]
-            _, buf = cv2.imencode('.jpg', face_img)
-            photo = io.BytesIO(buf)
-
-            bairro    = get_neighborhood()
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            caption   = f"👤 {name} em Vitória/ES, Brazil\n🕒 {timestamp}"
-
-            resp = requests.post(
-                TELEGRAM_API_URL,
-                data={'chat_id': CHAT_ID, 'caption': caption, 'parse_mode':'Markdown'},
-                files={'photo': ('face.jpg', photo.getvalue())}
-            )
-            if resp.ok:
-                print(f"Alerta enviado: {name} em Vitória/ES, Brazil")
+            agora = datetime.now()
+            # checa cooldown de 1 minuto
+            if name in last_alert:
+                diff = agora - last_alert[name]
             else:
-                print("Falha no envio:", resp.text)
+                diff = ALERT_COOLDOWN  # força envio na primeira vez
 
-            cap.release()
-            cv2.destroyAllWindows()
-            exit(0)
+            if diff >= ALERT_COOLDOWN:
+                # ajusta box ao tamanho original
+                top, right, bottom, left = [int(v / FRAME_RESIZE) for v in loc]
+                face_img = frame[top:bottom, left:right]
+                _, buf = cv2.imencode('.jpg', face_img)
+                photo = io.BytesIO(buf)
 
-    # desenha caixas e nomes
+                timestamp = agora.strftime('%Y-%m-%d %H:%M:%S')
+                caption   = f"🔔 {name} em Vitória/ES, Brazil\n🕒 {timestamp}"
+
+                resp = requests.post(
+                    TELEGRAM_API_URL,
+                    data={'chat_id': CHAT_ID, 'caption': caption},
+                    files={'photo': ('face.jpg', photo.getvalue())}
+                )
+                if resp.ok:
+                    print(f"Alerta enviado: {name} em Vitória/ES, Brazil")
+                else:
+                    print("Falha no envio:", resp.text)
+
+                # registra o momento do alerta e zera contagem de frames
+                last_alert[name] = agora
+                frame_counts[name] = 0
+            else:
+                # ainda dentro do intervalo de 1 minuto: não faz nada, só zera a contagem de frames
+                frame_counts[name] = 0
+
+    # desenha caixas e nomes na imagem (usando o último 'name' detectado neste frame)
     for loc in locations:
         t, r, b, l = [int(v / FRAME_RESIZE) for v in loc]
         cv2.rectangle(frame, (l, t), (r, b), (0, 255, 0), 2)
