@@ -1,11 +1,1 @@
-Primeiro, você precisa instalar o CMake:
-Baixe o CMake do site oficial: https://cmake.org/download/
-Durante a instalação, certifique-se de marcar a opção "Add CMake to the system PATH"
-Depois de instalar o CMake, você precisará instalar o Visual Studio Build Tools:
-Baixe do site oficial da Microsoft: https://visualstudio.microsoft.com/visual-cpp-build-tools/
-Durante a instalação, selecione "Desktop development with C++"
 
-Instale, selecione "Desktop development with C++"
-
-Após instalar essas dependências, instale as bibliotecas usadas.
-após, instale o aplicativo Iriun Webcam no seu celular e no seu computador
